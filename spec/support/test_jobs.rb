@@ -1,8 +1,10 @@
+require 'sidekiq-status'
+
 class StubJob
   include Sidekiq::Worker
   include Sidekiq::Status::Worker
 
-  sidekiq_options 'retry' => 'false'
+  sidekiq_options 'retry' => false
 
   def perform(*args)
   end
@@ -14,12 +16,17 @@ class CollectionJob < StubJob
   def perform(*args)
     sleep args[0] if args[0]
   end
+end
 
+class ExpiryJob < StubJob
+  def expiration
+    15
+  end
 end
 
 class LongJob < StubJob
   def perform(*args)
-    sleep args[0] || 1
+    sleep args[0] || 0.25
   end
 end
 
@@ -63,6 +70,12 @@ class FailingJob < StubJob
   end
 end
 
+class FailingHardJob < StubJob
+  def perform
+    raise Exception
+  end
+end
+
 class ExitedJob < StubJob
   def perform
     raise SystemExit
@@ -76,11 +89,13 @@ class InterruptedJob < StubJob
 end
 
 class RetriedJob < StubJob
-  sidekiq_options 'retry' => 'true'
+
+  sidekiq_options 'retry' => true
+  sidekiq_retry_in do |count| 3 end # 3 second delay > job timeout in test suite
+
   def perform()
     Sidekiq.redis do |conn|
       key = "RetriedJob_#{jid}"
-      sleep 1
       unless conn.exists key
         conn.set key, 'tried'
         raise StandardError

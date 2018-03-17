@@ -1,4 +1,5 @@
-require "sidekiq-status/version"
+require 'sidekiq-status/version'
+require 'sidekiq-status/sidekiq_extensions'
 require 'sidekiq-status/storage'
 require 'sidekiq-status/worker'
 require 'sidekiq-status/as_collection'
@@ -10,7 +11,7 @@ require 'chronic_duration'
 module Sidekiq::Status
   extend Storage
   DEFAULT_EXPIRY = 60 * 30
-  STATUS = [ :queued, :working, :complete, :stopped, :failed, :interrupted ].freeze
+  STATUS = [ :queued, :working, :retrying, :complete, :stopped, :failed, :interrupted ].freeze
 
   class << self
     # Job status by id
@@ -58,7 +59,7 @@ module Sidekiq::Status
     end
 
     def pct_complete(job_id)
-      ((at(job_id) / total(job_id).to_f) * 100 ).to_i if total(job_id).to_f > 0
+      get(job_id, :pct_complete).to_i
     end
 
     def message(job_id)

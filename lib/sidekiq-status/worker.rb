@@ -11,14 +11,14 @@ module Sidekiq::Status::Worker
   # @param [Hash] status_updates updated values
   # @return [String] Redis operation status code
   def store(hash)
-    store_for_id @jid, hash, self.class.to_s, @expiration
+    store_for_id @provider_job_id || @job_id || @jid, hash, self.class.to_s, @expiration
   end
 
   # Read value from job status hash
   # @param String|Symbol hask key
   # @return [String]
   def retrieve(name)
-    read_field_for_id @jid, name
+    read_field_for_id @provider_job_id || @job_id || @jid, name
   end
 
   # Sets current task progress
@@ -27,14 +27,16 @@ module Sidekiq::Status::Worker
   # @param String optional message
   # @return [String]
   def at(num, message = nil)
-    total(100) if retrieve(:total).nil?
-    store(at: num, message: message)
+    @_status_total = 100 if @_status_total.nil?
+    pct_complete = ((num / @_status_total.to_f) * 100).to_i rescue 0
+    store(at: num, total: @_status_total, pct_complete: pct_complete, message: message)
   end
 
   # Sets total number of tasks
   # @param Fixnum total number of tasks
   # @return [String]
   def total(num)
+    @_status_total = num
     store(total: num)
   end
 end

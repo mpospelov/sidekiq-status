@@ -9,22 +9,18 @@ describe Sidekiq::Status do
   let!(:plain_sidekiq_job_id) { SecureRandom.hex(12) }
   let!(:retried_job_id) { SecureRandom.hex(12) }
 
-  # Clean Redis before each test
-  # Seems like flushall has no effect on recently published messages,
-  # so we should wait till they expire
-  before { redis.flushall; sleep 0.1; client_middleware }
-
   describe ".status, .working?, .complete?" do
     it "gets job status by id as symbol" do
       allow(SecureRandom).to receive(:hex).once.and_return(job_id)
 
       start_server do
         expect(capture_status_updates(2) {
-          expect(LongJob.perform_async(1)).to eq(job_id)
-        }).to eq([job_id] * 2)
+          expect(LongJob.perform_async(0.5)).to eq(job_id)
+        }).to eq([job_id]*2)
         expect(Sidekiq::Status.status(job_id)).to eq(:working)
         expect(Sidekiq::Status.working?(job_id)).to be_truthy
         expect(Sidekiq::Status::queued?(job_id)).to be_falsey
+        expect(Sidekiq::Status::retrying?(job_id)).to be_falsey
         expect(Sidekiq::Status::failed?(job_id)).to be_falsey
         expect(Sidekiq::Status::complete?(job_id)).to be_falsey
         expect(Sidekiq::Status::stopped?(job_id)).to be_falsey
@@ -54,9 +50,9 @@ describe Sidekiq::Status do
       allow(SecureRandom).to receive(:hex).once.and_return(job_id)
 
       start_server do
-        expect(capture_status_updates(3) {
+        expect(capture_status_updates(4) {
           expect(ProgressJob.perform_async).to eq(job_id)
-        }).to eq([job_id]*3)
+        }).to eq([job_id]*4)
       end
       expect(Sidekiq::Status.at(job_id)).to be(100)
       expect(Sidekiq::Status.total(job_id)).to be(500)
@@ -72,7 +68,7 @@ describe Sidekiq::Status do
 
       start_server do
         expect(capture_status_updates(2) {
-          expect(LongJob.perform_async(1)).to eq(job_id)
+          expect(LongJob.perform_async(0.5)).to eq(job_id)
         }).to eq([job_id]*2)
         expect(hash = Sidekiq::Status.get_all(job_id)).to include 'status' => 'working'
         expect(hash).to include 'update_time'
@@ -87,7 +83,7 @@ describe Sidekiq::Status do
       allow(SecureRandom).to receive(:hex).once.and_return(job_id)
       start_server do
         expect(capture_status_updates(2) {
-          expect(LongJob.perform_async(1)).to eq(job_id)
+          expect(LongJob.perform_async(0.5)).to eq(job_id)
         }).to eq([job_id]*2)
       end
       expect(Sidekiq::Status.delete(job_id)).to eq(1)
@@ -153,13 +149,30 @@ describe Sidekiq::Status do
     end
 
     it "retries failed jobs" do
-      allow(SecureRandom).to receive(:hex).once.and_return(retried_job_id)
+      allow(SecureRandom).to receive(:hex).and_return(retried_job_id)
       start_server do
-        expect(capture_status_updates(5) {
+        expect(capture_status_updates(3) {
           expect(RetriedJob.perform_async()).to eq(retried_job_id)
-        }).to eq([retried_job_id] * 5)
+        }).to eq([retried_job_id] * 3)
+        expect(Sidekiq::Status.status(retried_job_id)).to eq(:retrying)
+        expect(Sidekiq::Status.working?(retried_job_id)).to be_falsey
+        expect(Sidekiq::Status::queued?(retried_job_id)).to be_falsey
+        expect(Sidekiq::Status::retrying?(retried_job_id)).to be_truthy
+        expect(Sidekiq::Status::failed?(retried_job_id)).to be_falsey
+        expect(Sidekiq::Status::complete?(retried_job_id)).to be_falsey
+        expect(Sidekiq::Status::stopped?(retried_job_id)).to be_falsey
+        expect(Sidekiq::Status::interrupted?(retried_job_id)).to be_falsey
       end
-      expect(Sidekiq::Status.status(retried_job_id)).to eq(:complete)
+      expect(Sidekiq::Status.status(retried_job_id)).to eq(:retrying)
+      expect(Sidekiq::Status::retrying?(retried_job_id)).to be_truthy
+
+      # restarting and waiting for the job to complete
+      start_server do
+        expect(capture_status_updates(3) {}).to eq([retried_job_id] * 3)
+        expect(Sidekiq::Status.status(retried_job_id)).to eq(:complete)
+        expect(Sidekiq::Status.complete?(retried_job_id)).to be_truthy
+        expect(Sidekiq::Status::retrying?(retried_job_id)).to be_falsey
+      end
     end
 
     context ":expiration param" do
@@ -172,7 +185,7 @@ describe Sidekiq::Status do
         expect_2_jobs_ttl_covers (Sidekiq::Status::DEFAULT_EXPIRY+1)..expiration_param
       end
 
-      it "allow to overwrite :expiration parameter by .expiration method from worker" do
+      it "allow to overwrite :expiration parameter by #expiration method from worker" do
         overwritten_expiration = expiration_param * 100
         allow_any_instance_of(NoStatusConfirmationJob).to receive(:expiration).
           and_return(overwritten_expiration)
@@ -181,6 +194,16 @@ describe Sidekiq::Status do
         run_2_jobs!
         expect_2_jobs_are_done_and_status_eq :complete
         expect_2_jobs_ttl_covers (expiration_param+1)..overwritten_expiration
+      end
+
+      it "reads #expiration from a method when defined" do
+        allow(SecureRandom).to receive(:hex).once.and_return(job_id, job_id_1)
+        start_server do
+          expect(StubJob.perform_async).to eq(job_id)
+          expect(ExpiryJob.perform_async).to eq(job_id_1)
+          expect(redis.ttl("sidekiq:status:#{job_id}")).to eq(30 * 60)
+          expect(redis.ttl("sidekiq:status:#{job_id_1}")).to eq(15)
+        end
       end
     end
 
@@ -191,12 +214,12 @@ describe Sidekiq::Status do
 
     def run_2_jobs!
       start_server(:expiration => expiration_param) do
-        expect(capture_status_updates(12) {
+        expect(capture_status_updates(6) {
           expect(StubJob.perform_async).to eq(plain_sidekiq_job_id)
           NoStatusConfirmationJob.perform_async(1)
           expect(StubJob.perform_async).to eq(job_id_1)
           NoStatusConfirmationJob.perform_async(2)
-        }).to match_array([plain_sidekiq_job_id, job_id_1] * 6)
+        }).to match_array([plain_sidekiq_job_id, job_id_1] * 3)
       end
     end
 
