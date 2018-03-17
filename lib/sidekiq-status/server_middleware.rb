@@ -50,13 +50,13 @@ module Sidekiq::Status
       # Determine job expiration
       expiry = job_class.new.expiration || @expiration rescue @expiration
 
-      store_status worker.jid, :working,  expiry
+      store_status worker.jid, :working, klass, expiry
       yield
-      store_status worker.jid, :complete, expiry
+      store_status worker.jid, :complete, klass, expiry
     rescue Worker::Stopped
-      store_status worker.jid, :stopped, expiry
+      store_status worker.jid, :stopped, klass, expiry
     rescue SystemExit, Interrupt
-      store_status worker.jid, :interrupted, expiry
+      store_status worker.jid, :interrupted, klass, expiry
       raise
     rescue Exception
       status = :failed
@@ -66,7 +66,7 @@ module Sidekiq::Status
           status = :retrying
         end
       end
-      store_status worker.jid, status, expiry
+      store_status worker.jid, status, klass, expiry
       raise
     end
 

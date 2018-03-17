@@ -13,6 +13,10 @@ end
 class CollectionJob < StubJob
   include Sidekiq::Status::AsCollection
 
+  def expiration
+    @expiration ||= 10 # seconds
+  end
+
   def perform(*args)
     sleep args[0] if args[0]
   end

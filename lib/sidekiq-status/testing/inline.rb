@@ -6,13 +6,13 @@ module Sidekiq
       end
     end
   end
-  
+
   module Storage
-    def store_status(id, status, expiration = nil, redis_pool=nil)
+    def store_status(id, status, worker_class, expiration = nil, redis_pool=nil)
       'ok'
     end
-    
-    def store_for_id(id, status_updates, expiration = nil, redis_pool=nil)
+
+    def store_for_id(id, status_updates, worker_class, expiration = nil, redis_pool=nil)
       'ok'
     end
   end

@@ -8,6 +8,10 @@ describe Sidekiq::Status::AsCollection do
   let!(:plain_sidekiq_job_id) { SecureRandom.hex(12) }
   let!(:retried_job_id) { SecureRandom.hex(12) }
 
+  def seed_secure_random_with_job_ids(jids)
+    allow(SecureRandom).to receive(:hex).exactly(4).times.and_return(*jids)
+  end
+
   # Clean Redis before each test
   # Seems like flushall has no effect on recently published messages,
   # so we should wait till they expire
@@ -44,15 +48,35 @@ describe Sidekiq::Status::AsCollection do
     end
   end
 
-  describe '.total' do
-    let(:jids) { 4.times.map { SecureRandom.hex(12) } }
+  describe '.remove_expired' do
+    let(:jids) { Array.new(4) { SecureRandom.hex(12) } }
 
-    def seed_secure_random_with_job_ids
-      allow(SecureRandom).to receive(:hex).exactly(4).times.and_return(*jids)
+    it 'removes all record in sidekiq:statuses_all:collectionjob which have expired score' do
+      start_server do
+        Timecop.freeze(Date.today) do
+          seed_secure_random_with_job_ids(jids)
+          # Time.now, +10mins, +20mins, 30mins
+          times_of_job_performs = Array.new(4) { |i| Time.now + 600 * i }
+          start_server do
+            capture_status_updates(12) do
+              4.times { |i| Timecop.travel(times_of_job_performs[i]) { CollectionJob.perform_async } }
+            end
+          end
+
+          expect(CollectionJob.total).to eq(4)
+          Timecop.travel(times_of_job_performs[2])
+          expect(CollectionJob.remove_expired).to eq(2)
+          expect(CollectionJob.all.map { |j| j[:jid] }).to eq(jids[2..-1])
+        end
+      end
     end
+  end
+
+  describe '.total' do
+    let(:jids) { Array.new(4) { SecureRandom.hex(12) } }
 
     it 'returns count of stored keys for job' do
-      seed_secure_random_with_job_ids
+      seed_secure_random_with_job_ids(jids)
       start_server do
         capture_status_updates(12) { 4.times { CollectionJob.perform_async } }
       end
@@ -61,14 +85,10 @@ describe Sidekiq::Status::AsCollection do
   end
 
   describe '.all' do
-    let(:jids) { 4.times.map { SecureRandom.hex(12) } }
-
-    def seed_secure_random_with_job_ids
-      allow(SecureRandom).to receive(:hex).exactly(4).times.and_return(*jids)
-    end
+    let(:jids) { Array.new(4) { SecureRandom.hex(12) } }
 
     it 'picks sorted keys by update_time and allows to pick them by page' do
-      seed_secure_random_with_job_ids
+      seed_secure_random_with_job_ids(jids)
       start_server do
         capture_status_updates(12) { 4.times { CollectionJob.perform_async } }
       end
@@ -78,7 +98,7 @@ describe Sidekiq::Status::AsCollection do
     end
 
     it 'does not touch redis if no iteration was requested' do
-      seed_secure_random_with_job_ids
+      seed_secure_random_with_job_ids(jids)
       start_server do
         capture_status_updates(12) { 4.times { CollectionJob.perform_async } }
       end

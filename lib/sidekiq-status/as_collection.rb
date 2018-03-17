@@ -30,6 +30,10 @@ module Sidekiq::Status::AsCollection
       base_collection.total
     end
 
+    def remove_expired
+      base_collection.remove_expired
+    end
+
     private
 
     def base_collection
@@ -91,6 +95,12 @@ module Sidekiq::Status::AsCollection
     # Uses downcased worked_name to generate name of collection to store jids
     def keys_collection
       "#{NAMESPACE}:#{@worker_name.downcase}"
+    end
+
+    def remove_expired
+      Sidekiq.redis do |conn|
+        conn.zremrangebyscore(keys_collection, '-inf', Time.now.to_i)
+      end
     end
 
     private

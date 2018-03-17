@@ -14,11 +14,14 @@ module Sidekiq::Status::Storage
   # @return [String] Redis operation status code
   def store_for_id(id, status_updates, worker_class, expiration = nil, redis_pool=nil)
     namespaced_key = key(id)
+    expiration ||= Sidekiq::Status::DEFAULT_EXPIRY
+    expires_at = Time.now + expiration
+    keys_collection_name = "#{Sidekiq::Status::AsCollection::NAMESPACE}:#{worker_class.downcase}"
     redis_connection(redis_pool) do |conn|
       conn.multi do
         conn.hmset  namespaced_key, UPDATE_TIME, Time.now.to_i, *(status_updates.to_a.flatten(1))
-        conn.expire namespaced_key, (expiration || Sidekiq::Status::DEFAULT_EXPIRY)
-        conn.sadd("#{Sidekiq::Status::AsCollection::NAMESPACE}:#{worker_class.downcase}", namespaced_key)
+        conn.expire namespaced_key, expiration
+        conn.zadd(keys_collection_name, expires_at.to_i, namespaced_key)
         conn.publish 'status_updates', id
       end[0]
     end
@@ -28,11 +31,12 @@ module Sidekiq::Status::Storage
   # only in case of :failed or :stopped job
   # @param [String] id job id
   # @param [Symbol] job status
+  # @param [String] worker class
   # @param [Integer] expiration optional expire time in seconds
   # @param [ConnectionPool] redis_pool optional redis connection pool
   # @return [String] Redis operation status code
-  def store_status(worker, status, expiration = nil, redis_pool=nil)
-    store_for_id worker, {status: status}, expiration, redis_pool
+  def store_status(worker, status, worker_class, expiration = nil, redis_pool=nil)
+    store_for_id worker, {status: status}, worker_class, expiration, redis_pool
   end
 
   # Unschedules the job and deletes the Status
