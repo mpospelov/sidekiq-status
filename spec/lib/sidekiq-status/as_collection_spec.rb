@@ -21,18 +21,31 @@ describe Sidekiq::Status::AsCollection do
     conn.zrange("#{Sidekiq::Status::AsCollection::NAMESPACE}:#{worker.to_s.downcase}", 0, -1) || 0
   end
 
+  def all_expirations(conn, worker)
+    keys_collection = "#{Sidekiq::Status::AsCollection::NAMESPACE}:#{worker.to_s.downcase}"
+    Hash[all_keys(conn, worker).map { |k| [k, conn.zscore(keys_collection, k)] }]
+  end
+
   describe ".refresh_collection" do
-    it "puts all keys under sidekiq:status:* to sidekiq:statuses_all:collectionjob" do
+    it "puts all keys under sidekiq:status:* to sidekiq:statuses_all:collectionjob and stores proper expires score" do
       start_server do
         redis.hmset 'sidekiq:status:foo', { worker: 'CollectionJob' }.to_a.flatten(1)
+        redis.expire 'sidekiq:status:foo', 10
         redis.hmset 'sidekiq:status:foo1', { worker: 'CollectionJob' }.to_a.flatten(1)
+        redis.expire 'sidekiq:status:foo1', 20
         redis.hmset 'sidekiq:status:foo2', { worker: 'CollectionJob' }.to_a.flatten(1)
+        redis.expire 'sidekiq:status:foo2', 30
         redis.hmset 'sidekiq:status:foo3', { worker: 'WrongJob' }.to_a.flatten(1)
+        redis.expire 'sidekiq:status:foo3', 40
 
         expect(all_keys(redis, CollectionJob).size).to eq(0)
         expect(CollectionJob.refresh_collection).to eq(3)
         expect(all_keys(redis, CollectionJob).size).to eq(3)
         expect(all_keys(redis, CollectionJob).sort).to eq(['sidekiq:status:foo', 'sidekiq:status:foo1', 'sidekiq:status:foo2'])
+        expirations = all_expirations(redis, CollectionJob)
+        expect(expirations['sidekiq:status:foo'].to_i).to eq((Time.now + 10).to_i)
+        expect(expirations['sidekiq:status:foo1'].to_i).to eq((Time.now + 20).to_i)
+        expect(expirations['sidekiq:status:foo2'].to_i).to eq((Time.now + 30).to_i)
       end
     end
 
@@ -53,21 +66,18 @@ describe Sidekiq::Status::AsCollection do
 
     it 'removes all record in sidekiq:statuses_all:collectionjob which have expired score' do
       start_server do
-        Timecop.freeze(Date.today) do
-          seed_secure_random_with_job_ids(jids)
-          # Time.now, +10mins, +20mins, 30mins
-          times_of_job_performs = Array.new(4) { |i| Time.now + 600 * i }
-          start_server do
-            capture_status_updates(12) do
-              4.times { |i| Timecop.travel(times_of_job_performs[i]) { CollectionJob.perform_async } }
-            end
+        seed_secure_random_with_job_ids(jids)
+        capture_status_updates(12) do
+          # NOTE: we have 4 jobs and launching all of them takes 4 seconds
+          # expiration is 3 seconds so we should have 1 job expired
+          4.times do |i|
+            CollectionJob.perform_async
+            sleep 1
           end
-
-          expect(CollectionJob.total).to eq(4)
-          Timecop.travel(times_of_job_performs[2])
-          expect(CollectionJob.remove_expired).to eq(2)
-          expect(CollectionJob.all.map { |j| j[:jid] }).to eq(jids[2..-1])
         end
+
+        expect(CollectionJob.remove_expired).to eq(1)
+        expect(CollectionJob.all.map { |j| j[:jid] }).to eq(jids[1..-1].reverse)
       end
     end
   end

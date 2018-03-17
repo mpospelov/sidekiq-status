@@ -191,6 +191,7 @@ describe Sidekiq::Status do
           and_return(overwritten_expiration)
         allow_any_instance_of(StubJob).to receive(:expiration).
           and_return(overwritten_expiration)
+        puts overwritten_expiration
         run_2_jobs!
         expect_2_jobs_are_done_and_status_eq :complete
         expect_2_jobs_ttl_covers (expiration_param+1)..overwritten_expiration

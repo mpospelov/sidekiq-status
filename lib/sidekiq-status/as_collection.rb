@@ -83,7 +83,7 @@ module Sidekiq::Status::AsCollection
         end
         conn.del(keys_collection)
         break 0 if worker_keys.empty?
-        conn.sadd keys_collection, worker_keys
+        conn.zadd keys_collection, worker_keys.map { |k| [(Time.now + conn.ttl(k)).to_f, k] }
       end
     end
 

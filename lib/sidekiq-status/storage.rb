@@ -21,7 +21,7 @@ module Sidekiq::Status::Storage
       conn.multi do
         conn.hmset  namespaced_key, UPDATE_TIME, Time.now.to_i, *(status_updates.to_a.flatten(1))
         conn.expire namespaced_key, expiration
-        conn.zadd(keys_collection_name, expires_at.to_i, namespaced_key)
+        conn.zadd(keys_collection_name, expires_at.to_f, namespaced_key)
         conn.publish 'status_updates', id
       end[0]
     end
