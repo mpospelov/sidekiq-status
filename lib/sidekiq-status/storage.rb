@@ -51,7 +51,7 @@ module Sidekiq::Status::Storage
         unless match.nil?
           conn.zrem "schedule", match
           conn.del key(job_id)
-          conn.srem(worker.keys_collection, [key(job_id)]) unless worker.nil?
+          conn.zrem(worker.keys_collection, [key(job_id)]) unless worker.nil?
           return true # Done
         end
         scan_options[:offset] += BATCH_LIMIT
@@ -65,7 +65,7 @@ module Sidekiq::Status::Storage
   # @retrun [Integer] number of keys that were removed
   def delete_status(id, worker: nil)
     redis_connection do |conn|
-      conn.srem(worker.keys_collection, [key(id)]) unless worker.nil?
+      conn.zrem(worker.keys_collection, [key(id)]) unless worker.nil?
       conn.del(key(id))
     end
   end

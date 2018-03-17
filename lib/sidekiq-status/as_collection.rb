@@ -89,7 +89,7 @@ module Sidekiq::Status::AsCollection
 
     # Uses worker_name to return number of jids stored in redis set
     def total
-      Sidekiq.redis { |conn| conn.scard(keys_collection) }
+      Sidekiq.redis { |conn| conn.zcard(keys_collection) }
     end
 
     # Uses downcased worked_name to generate name of collection to store jids

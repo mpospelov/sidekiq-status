@@ -18,7 +18,7 @@ describe Sidekiq::Status::AsCollection do
   before { redis.flushall; sleep 0.1; client_middleware }
 
   def all_keys(conn, worker)
-    conn.smembers("#{Sidekiq::Status::AsCollection::NAMESPACE}:#{worker.to_s.downcase}") || 0
+    conn.zrange("#{Sidekiq::Status::AsCollection::NAMESPACE}:#{worker.to_s.downcase}", 0, -1) || 0
   end
 
   describe ".refresh_collection" do
