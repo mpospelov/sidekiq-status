@@ -1,3 +1,12 @@
+**Version 1.0.1**
++ Fixes namespacing in `sidekiq-status/testing/inline`
+
+**Version 1.0.0**
++ Version number bumped to indicate stable release
+
+**Version 0.8.1**
++ Avoids transient celluloid dependency in Sidekiq < 5.x
+
 **Version 0.8.0**
 + Properly ignores jobs that do not have `Sidekiq::Status::Worker` included
 + Honors custom job expirations for ActiveJob jobs
